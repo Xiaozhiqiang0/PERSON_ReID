@@ -18,6 +18,8 @@ def read_image(img_path):
     while not got_img:
         try:
             img = Image.open(img_path).convert('RGB')
+            # 如果不使用.convert(‘RGB’)进行转换的话，读出来的图像是RGBA四通道的，
+            # A通道为透明通道，该对深度学习模型训练来说暂时用不到，因此使用convert(‘RGB’)进行通道转换。
             got_img = True
         except IOError:
             print("IOError incurred when reading '{}'. Will redo. Don't worry. Just chill.".format(img_path))

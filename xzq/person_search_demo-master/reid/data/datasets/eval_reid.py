@@ -6,7 +6,7 @@
 
 import numpy as np
 
-
+# 输入距离，查询id,目标id,查询相机编号，目标编号
 def eval_func(distmat, q_pids, g_pids, q_camids, g_camids, max_rank=50):
     """Evaluation with market1501 metric
         Key: for each query identity, its gallery images from the same camera view are discarded.
@@ -16,7 +16,9 @@ def eval_func(distmat, q_pids, g_pids, q_camids, g_camids, max_rank=50):
         max_rank = num_g
         print("Note: number of gallery samples is quite small, got {}".format(num_g))
     indices = np.argsort(distmat, axis=1)
+    # argsort()函数是将x中的元素从小到大排列，提取其对应的index(索引)，然后输出到y
     matches = (g_pids[indices] == q_pids[:, np.newaxis]).astype(np.int32)
+    # np.newaxis增加新维度，astype变量类型转换
 
     # compute cmc curve for each query
     all_cmc = []

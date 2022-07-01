@@ -12,10 +12,13 @@ import torch
 import torch.nn as nn
 import tqdm
 
+import glob
+import cv2
 from . import torch_utils  # , google_utils
 
 from termcolor import cprint
 from PIL import Image, ImageDraw, ImageFont
+
 matplotlib.rc('font', **{'size': 11})
 
 # Set printoptions
@@ -46,6 +49,7 @@ def load_classes(path):
     with open(path, 'r') as f:
         names = f.read().split('\n')
     return list(filter(None, names))  # filter removes empty strings (such as last line)
+
 
 def labels_to_image_weights(labels, nc=80, class_weights=np.ones(80)):
     # Produces image weights based on class mAPs
@@ -100,6 +104,7 @@ def clip_coords(boxes, img_shape):
     # Clip bounding xyxy bounding boxes to image shape (height, width)
     boxes[:, [0, 2]] = boxes[:, [0, 2]].clamp(min=0, max=img_shape[1])  # clip x
     boxes[:, [1, 3]] = boxes[:, [1, 3]].clamp(min=0, max=img_shape[0])  # clip y
+
 
 def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False):
     # Returns the IoU of box1 to box2. box1 is 4, box2 is nx4
@@ -186,7 +191,7 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
         # 3.torch.isfinite(pred).all(1): 保留预测值都正常的
         # torch.isfinite(pred) 返回一个新的张量，其布尔元素表示每个元素是否为+/-INF,是INF NAN则返回0
         i = (pred[:, 4] > conf_thres) & (pred[:, 2:4] > min_wh).all(1) & torch.isfinite(pred).all(1)
-        pred = pred[i] # 经过NMS，只剩下29个预测框 torch.Size([29, 85])
+        pred = pred[i]  # 经过NMS，只剩下29个预测框 torch.Size([29, 85])
 
         # If none are remaining => process next image
         if len(pred) == 0:
@@ -199,10 +204,10 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
         class_pred = class_pred[i].unsqueeze(1).float()
 
         # Box (center x, center y, width, height) to (x1, y1, x2, y2)
-        pred[:, :4] = xywh2xyxy(pred[:, :4]) # torch.Size([29, 85])
+        pred[:, :4] = xywh2xyxy(pred[:, :4])  # torch.Size([29, 85])
 
         # Detections ordered as (x1y1x2y2, obj_conf, class_conf, class_pred)
-        pred = torch.cat((pred[:, :5], class_conf.unsqueeze(1), class_pred), 1) # 通过这样NMS后，只剩下29个框torch.Size([29, 7])
+        pred = torch.cat((pred[:, :5], class_conf.unsqueeze(1), class_pred), 1)  # 通过这样NMS后，只剩下29个框torch.Size([29, 7])
 
         # Get detections sorted by decreasing confidence scores
         # 对于剩下的预测框安装置信度(类别概率乘以confidence)得分进行排序
@@ -220,9 +225,9 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
         'SOFT' : soft-NMS https://arxiv.org/abs/1704.04503
         """
         nms_style = 'MERGE'  # 'OR' (default), 'AND', 'MERGE' (experimental), 'SOFT'
-        for c in pred[:, -1].unique():   # 没有80类一个个遍历，更高效
+        for c in pred[:, -1].unique():  # 没有80类一个个遍历，更高效
             dc = pred[pred[:, -1] == c]  # select class c torch.Size([21, 7]) 代表这个类别有21个预测框
-            n = len(dc) # 当前类别有len(dc)=21个预测框
+            n = len(dc)  # 当前类别有len(dc)=21个预测框
             if n == 1:
                 det_max.append(dc)  # No NMS required if only 1 prediction
                 continue
@@ -234,20 +239,20 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
             if nms_style == 'OR':  # default
                 # torch.Size([21, 7]) 开始时21个框
                 # dc.shape[0]也就是预测框的数目，如果预测框数目为0，则退出循环
-                while dc.shape[0]: # 21->14->9->3->0
+                while dc.shape[0]:  # 21->14->9->3->0
                     det_max.append(dc[:1])  # 保留conf最高的预测框 4
                     if len(dc) == 1:  # 如果只剩下一个预测框了，退出循环
                         break
-                    iou = bbox_iou(dc[0], dc[1:]) # 计算conf得分最高的预测框与其他框的IoU
+                    iou = bbox_iou(dc[0], dc[1:])  # 计算conf得分最高的预测框与其他框的IoU
                     dc = dc[1:][iou < nms_thres]  # 移除与当前conf得分最高的预测框IoU大于阈值的预测框 remove ious > threshold
 
             elif nms_style == 'AND':  # requires overlap, single boxes erased
-                while len(dc) > 1:    # 21->14->9->3->0
+                while len(dc) > 1:  # 21->14->9->3->0
                     # 计算得分最高的预测框与其他框的IoU
                     iou = bbox_iou(dc[0], dc[1:])  # iou with other boxes dc[1:]: torch.Size([20])
-                    if iou.max() > 0.5:            # 与当前conf得分最高的预测框IoU最大的如果大于0.5
-                        det_max.append(dc[:1])     # 那么就将conf得分最高的预测框加入最终的det_max
-                    dc = dc[1:][iou < nms_thres]   # remove ious > threshold
+                    if iou.max() > 0.5:  # 与当前conf得分最高的预测框IoU最大的如果大于0.5
+                        det_max.append(dc[:1])  # 那么就将conf得分最高的预测框加入最终的det_max
+                    dc = dc[1:][iou < nms_thres]  # remove ious > threshold
 
             elif nms_style == 'MERGE':  # weighted mixture box 默认采用，精度更高，但速度较慢一些
                 while len(dc):
@@ -255,10 +260,10 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
                         det_max.append(dc)
                         break
                     i = bbox_iou(dc[0], dc) > nms_thres  # 取大于NMS阈值的框
-                    weights = dc[i, 4:5]      # 取出iou大于NMS阈值的框求得这些框的conf值作为weights torch.Size([7, 1])
+                    weights = dc[i, 4:5]  # 取出iou大于NMS阈值的框求得这些框的conf值作为weights torch.Size([7, 1])
                     dc[0, :4] = (weights * dc[i, :4]).sum(0) / weights.sum()
                     det_max.append(dc[:1])
-                    dc = dc[i == 0] # 这一步也就是进行了筛选
+                    dc = dc[i == 0]  # 这一步也就是进行了筛选
 
             elif nms_style == 'SOFT':  # soft-NMS https://arxiv.org/abs/1704.04503
                 sigma = 0.5  # soft-nms sigma parameter
@@ -272,7 +277,7 @@ def non_max_suppression(prediction, conf_thres=0.5, nms_thres=0.5):
                     dc[:, 4] *= torch.exp(-iou ** 2 / sigma)  # decay confidences
                     dc = dc[dc[:, 4] > nms_thres]  # new line per https://github.com/ultralytics/yolov3/issues/362
 
-        if len(det_max): # 5
+        if len(det_max):  # 5
             det_max = torch.cat(det_max)  # concatenate torch.Size([5, 7])
             output[image_i] = det_max[(-det_max[:, 4]).argsort()]  # sort
 
@@ -432,22 +437,35 @@ def plot_one_box(x, img, color=None, label=None, line_thickness=None):
     if label:
         tf = max(tl - 1, 1)  # font thickness
         t_size = cv2.getTextSize(label, 0, fontScale=tl / 3, thickness=tf)[0]
+
         c2 = c1[0] + t_size[0], c1[1] - t_size[1] - 3
         cv2.rectangle(img, c1, c2, color, -1)  # filled
         cv2.putText(img, label, (c1[0], c1[1] - 2), 0, tl / 3, [225, 255, 255], thickness=tf, lineType=cv2.LINE_AA)
 
+
+def crop_from_box(x, img, index):
+    c1, c2 = (int(x[0]), int(x[1])), (int(x[2]), int(x[3]))
+    box = (*c1, *c2)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    imgjpg = Image.fromarray(np.uint8(img))
+    imgjpg = imgjpg.crop(box)
+    if (imgjpg.size[0] > 35) & (imgjpg.size[1] > 75):
+        imgjpg.save('query/0001_c1s1_00{:04d}_00.jpg'.format(index))
+
+
 def print_info(info, _type=None):
     if _type is not None:
-        if isinstance(info,str):
+        if isinstance(info, str):
             cprint(info, _type[0], attrs=[_type[1]])
-        elif isinstance(info,list):
+        elif isinstance(info, list):
             for i in range(info):
                 cprint(i, _type[0], attrs=[_type[1]])
     else:
         print(info)
 
+
 def cv2ImgAddText(img, text, left, top, textColor=(0, 255, 0), textSize=20):
-    if (isinstance(img, np.ndarray)):  #判断是否OpenCV图片类型
+    if (isinstance(img, np.ndarray)):  # 判断是否OpenCV图片类型
         img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img)
     fontText = ImageFont.truetype("font/simsun.ttc", textSize, encoding="utf-8")

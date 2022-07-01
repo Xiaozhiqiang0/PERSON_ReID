@@ -2,30 +2,36 @@ import argparse
 import time
 from sys import platform
 
+import torch
+import os
 from models import *
 from utils.datasets import *
 from utils.utils import *
+from PIL import Image
 
 
 def detect(cfg,
            data,
            weights,
            images='data/samples',  # input folder
+           query='query',
            output='output',  # output folder
            fourcc='mp4v',  # video codec
            img_size=416,
            conf_thres=0.5,
            nms_thres=0.5,
            save_txt=False,
-           save_images=True):
-
+           save_images=True,
+           plot_rectangle=True):
     # Initialize
     device = torch_utils.select_device(force_cpu=False)
     torch.backends.cudnn.benchmark = False  # set False for reproducible results
     if os.path.exists(output):
         shutil.rmtree(output)  # 删除output文件夹，清理之前的检测结果
-    os.makedirs(output)        # 创建新的output文件夹
-
+    os.makedirs(output)  # 创建新的output文件夹
+    if os.path.exists(query):
+        shutil.rmtree(query)  # 删除query文件夹，清理之前的检测结果
+    os.makedirs(query)
     # Initialize model
     model = Darknet(cfg, img_size)
 
@@ -49,26 +55,29 @@ def detect(cfg,
     # Set Dataloader
     vid_path, vid_writer = None, None
     if opt.webcam:
-        save_images = False
+        save_images = True
         dataloader = LoadWebcam(img_size=img_size, half=opt.half)
     else:
         dataloader = LoadImages(images, img_size=img_size, half=opt.half)
 
     # Get classes and colors
     # parse_data_cfg(data)['names']:得到类别名称文件路径 names=data/coco.names
-    classes = load_classes(parse_data_cfg(data)['names']) # 得到类别名列表: ['person', 'bicycle'...]
-    colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(classes))] # 对于每种类别随机使用一种颜色画框
+    classes = load_classes(parse_data_cfg(data)['names'])  # 得到类别名列表: ['person', 'bicycle'...]
+    colors = [[random.randint(0, 255) for _ in range(3)] for _ in range(len(classes))]  # 对于每种类别随机使用一种颜色画框
 
     # Run inference
     t0 = time.time()
+    a = 1
     for i, (path, img, im0, vid_cap) in enumerate(dataloader):
+
         t = time.time()
-        save_path = str(Path(output) / Path(path).name) # 保存的路径
+        save_path = str(Path(output) / Path(path).name)  # 保存的路径
 
         # Get detections shape: (3, 416, 320)
-        img = torch.from_numpy(img).unsqueeze(0).to(device) # torch.Size([1, 3, 416, 320])
-        pred, _ = model(img) # 经过处理的网络预测，和原始的
-        det = non_max_suppression(pred.float(), conf_thres, nms_thres)[0] # torch.Size([5, 7])
+
+        img = torch.from_numpy(img).unsqueeze(0).to(device)  # torch.Size([1, 3, 416, 320])
+        pred, _ = model(img)  # 经过处理的网络预测，和原始的
+        det = non_max_suppression(pred.float(), conf_thres, nms_thres)[0]  # torch.Size([5, 7])
 
         if det is not None and len(det) > 0:
             # Rescale boxes from 416 to true image size 映射到原图
@@ -76,24 +85,31 @@ def detect(cfg,
 
             # Print results to screen image 1/3 data\samples\000493.jpg: 288x416 5 persons, Done. (0.869s)
             print('%gx%g ' % img.shape[2:], end='')  # print image size '288x416'
-            for c in det[:, -1].unique():   # 对图片的所有类进行遍历循环
-                n = (det[:, -1] == c).sum() # 得到了当前类别的个数，也可以用来统计数目
-                print('%g %ss' % (n, classes[int(c)]), end=', ') # 打印个数和类别'5 persons'
+            for c in det[:, -1].unique():  # 对图片的所有类进行遍历循环
+                n = (det[:, -1] == c).sum()  # 得到了当前类别的个数，也可以用来统计数目
+                print('%g %ss' % (n, classes[int(c)]), end=', ')  # 打印个数和类别'5 persons'
 
             # Draw bounding boxes and labels of detections
             # (x1y1x2y2, obj_conf, class_conf, class_pred)
             count = 0
-            for *xyxy, conf, cls_conf, cls in det: # 对于最后的预测框进行遍历
+            b = 1
+            for *xyxy, conf, cls_conf, cls in det:  # 对于最后的预测框进行遍历
+
                 # *xyxy: 对于原图来说的左上角右下角坐标: [tensor(349.), tensor(26.), tensor(468.), tensor(341.)]
                 if save_txt:  # Write to file
                     with open(save_path + '.txt', 'a') as file:
                         file.write(('%g ' * 6 + '\n') % (*xyxy, cls, conf))
 
                 # Add bbox to the image
-                label = '%s %.2f' % (classes[int(cls)], conf) # 'person 1.00'
+                label = '%s %.2f' % (classes[int(cls)], conf)  # 'person 1.00'
                 # 只显示检测的人
+                index = a * 10 + b
                 if classes[int(cls)] == 'person':
-                    plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
+                    if plot_rectangle:
+                        plot_one_box(xyxy, im0, label=label, color=colors[int(cls)])
+                    crop_from_box(xyxy, im0, index)
+                    b += 1
+        a += 1
 
         # cv2.imshow('result', im0)
         # cv2.waitKey(10)
@@ -151,3 +167,5 @@ if __name__ == '__main__':
                nms_thres=opt.nms_thres,
                fourcc=opt.fourcc,
                output=opt.output)
+    path = opt.output
+    os.startfile(path)

@@ -60,7 +60,7 @@ class Baseline(nn.Module):
 
 
     def load_param(self, trained_path):
-        param_dict = torch.load(trained_path)
+        param_dict = torch.load(trained_path,map_location='cpu')
         for i in param_dict:
             if 'classifier' in i:
                 continue
